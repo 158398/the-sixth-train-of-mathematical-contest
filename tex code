@@ -1,0 +1,686 @@
+\documentclass{cumcmthesis}
+% \documentclass[withoutpreface,bwprint]{cumcmthesis} %去掉封面与编号页，电子版提交的时候使用。
+
+
+\usepackage[framemethod=TikZ]{mdframed}
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\usepackage{url}   % 网页链接
+\usepackage{subcaption} % 子标题
+\title{}
+\tihao{B}
+\baominghao{0000}
+\schoolname{电子科技大学}
+\membera{ }
+\memberb{ }
+\memberc{ }
+\supervisor{ }
+\yearinput{2023}
+\monthinput{07}
+\dayinput{05}
+
+\begin{document}
+\pagenumbering{gobble}
+ \maketitle
+ \begin{abstract}
+水冷散热片在北方已经因其优点被广泛应用。本文主要研究房屋在散热片作用下的升温过程，以 Fourier 定律和能量守恒定律为理论依据，建立了基于热传导方程的温度分布模型。然后基于启发式算法构建了调整次数最少的控制器，最后使用PID算法成功构建了实时响应外界环境变化的控制器。
+\par
+\textbf{对于问题一：}我们通过分析传热模型特点，将墙壁的热三维模型简化为\textbf{一维模型}，再研究非稳态传热过程。主要考虑墙壁的\textbf{热传导}、热水的\textbf{热对流}两种传热方式，在墙壁边界处建立基于能量守恒定律的偏微分方程组，确定初值条件，得到房间升温的数学模型。我们的模型和求解结果显示散热片的水温更能影响室温，而升温是一个先快后慢接近平缓的过程。室温在流量为 1 立方米每小时，水温 60 摄氏度的条件下半小时左右升至 37 度并能够保持一长段时间，表明散热片的效率能满足日常需要。
+\par
+\textbf{对于问题二：}
+这是一个对外部环境敏感的控制类优化问题，要求将室温控制在\textbf{理想区间}内。我们首先拟合了室外温度变化的曲线，然后构建了\textbf{求解器}以求得一些符合控制要求的解，求解器将一天均分为n份，然后在每个时间间隔里尝试实现局部最优，再增加小范围的随机性。在得到一个较大的解空间之后，我们使用\textbf{遗传算法}构建了一个优化器，它将改变次数作为适应度，不同时间点位的流量作为基因。以期搜寻解空间里的最优解。结果显示对于题目所给数据，最多调整10次就可以使室温保持在理想区间。
+\par
+\textbf{对于问题三:}我们利用\textbf{PID算法}进行流量的自动控制。将室外温度作为环境变量，在问题一中的散热模型的基础上，根据室内温度和理想温度的误差建立控制流量。PID中的\textbf{积分项和微分项}可以处理过去和未来误差，修正环境累积的变化。我们以6分钟为一个步长构建离散PID模型，结果显示我们的的模型可以将温度控制在22.5度到23.5度之间并且能够自动响应室外温度变化。
+\par
+对模型的灵敏度分析显示在某个阈值后流量和水温对室温的影响会快速降低，而我们的模型可以捕捉到此变化。在PID算法中参数的变化对控制效果有较大影响，在实际中需要谨慎选择参数。
+\keywords{非稳态传热，遗传算法，PID}
+\end{abstract}
+\pagenumbering{arabic}
+%目录  2019 明确不要目录，我觉得这个规定太好了
+%\tableofcontents
+
+%\newpage
+\section{问题重述}
+\subsection{问题背景}
+在北方，水冷散热片因其散热效率高，速度快而逐步取代空气散热片。在实际应用中，建立一个热传导模型有助于散热片使用和改进，人们同时也关心如何控制散热片的行为，以保持房屋温度在一个舒适区间，这就需要设计一套针对户外温度变化的散热片自动控制策略。
+\subsection{问题分析}
+\subsubsection{问题1}
+问题一本质上要求建立热传导方程组描述加热过程，需要考虑空气与传热片之间的接触，以及房屋墙壁的散热效应。首先根据房屋尺寸得到边界条件，再找到墙体材料的热阻，然后得到墙壁的传热系数K，最后根据传热片热流分布建立微分方程组并求解，具体步骤如下：
+\begin{enumerate}
+    \item 找到墙壁各层的子热传导系数，计算墙壁的热传导系数。
+    \item 列出各层满足的热传导方程，确定边界条件，即x等于0与x等于墙壁厚度。建立散热微分方程。
+    \item  根据水流流量和温度建立供热方程。
+    \item 联立两组方程得到净热量变化率，进而计算房间内温度。
+\end{enumerate}
+\subsubsection{问题2}
+问题二需要设计控制策略，在保持温度区间的同时控制次数最小，也即控制成本最低。我们认为这是一个针对特定场景的优化问题。我们设计了求解器和优化器两部分，求解器用来寻找可能的满足条件的解，优化器使用启发式算法搜寻解空间。具体流程如下：
+\begin{enumerate}
+    \item 将一天n等分，假设散热片在每个区间最多改变流量一次。
+    \item 在每个时间间隔n内进行决策，决定是否改变流量。
+    \item 如果需要改变流量，根据当前温差寻找合适的流量。
+    \item 重复过程，求出一天的决策序列，然后重复以上过程得到若干决策序列。
+    \item 使用遗传算法寻找最优解。
+\end{enumerate}
+\subsubsection{问题3}
+问题三相对于前面的问题增加了即时性的要求而不要求控制次数，这要求我们设计一个对室外温度敏感的自动控制系统，我们选择控制理论中的经典算法PID。我们设定了理想温度和温度上下限，将流量设为变量进行优化，输入问题所给室外温度作为环境变量，最后得到流量控制曲线。
+\section{模型假设}
+为简化模型，分析问题本质，我们提出如下假设：
+\begin{enumerate}
+    \item 认为房间内的空气温度和温度的变化均匀。
+   \item 忽略热辐射和空气对流效应，即墙壁通过接触散热，散热片通过热对流放热。
+   \item 边界条件均匀分布，热传递可看做只在一个方向进行，即垂直于物体表面。
+   
+\end{enumerate}
+\section{符号说明}
+\begin{table}[H]
+\renewcommand\arraystretch{1.5}
+\tabcolsep=0.8cm
+    \centering
+    \caption{符号说明}
+    \begin{tabular}{cc}
+    \hline
+       符号  & 意义 \\
+    \hline
+     T&温度\\
+    \hline
+    $\alpha$&涂料传热系数\\
+    \hline
+    r&热阻\\
+    \hline
+   
+     K&传热系数\\
+     
+    \hline
+    ta&散热片水温\\
+    \hline
+    va&散热片水的流速\\
+    \hline
+    n&n等分的天数\\
+    \hline
+    N&一个序列改变流量的次数\\
+    \hline
+    $K_{p}$&PID中比例项系数\\
+    \hline
+    $K_{i}$&PID中积分项系数\\
+    \hline
+    $K_{d}$&PID中微分项系数\\
+    \hline
+    \end{tabular}
+    \label{tab:my_label}
+\end{table}
+\section{模型建立}
+\subsection{问题一：基于墙体热接触散热和散热片对流放热的微分模型}
+在温度变化只源于传热器与空气之间的热交换的假设下, 该过程可以用非稳态热传导方程进行描述.下面我们建立坐标系,确定墙壁的热传导系数，根据相应的边界条件和空气比热容建立热传导方程组,最终给出模型。
+\par
+在三维空间中的热传导方程满足下列方程：
+\begin{align}
+  \rho c \frac{\partial T}{\partial t}&=\frac{\partial}{\partial x}\left(\lambda \frac{\partial T}{\partial x}\right)+\frac{\partial}{\partial y}\left(\lambda \frac{\partial T}{\partial y}\right)+\frac{\partial}{\partial z}\left(\lambda \frac{\partial T}{\partial z}\right)+\dot{\boldsymbol{\Phi}}
+\end{align}
+其中a，c，$\rho$，t分别为介质热扩散率、比热与密度，时间。等号左边一项是单位时间内微元体热力学能的增量，称为非稳态项；等号右边前三项之和是通过界面的导热而使微元体在单位时间内增加的能量，称为扩散项；等号右边最后一项是源项，描述内部热源的影响。。由于不计空气对流，假设墙体平面均匀散热，因此忽略高度与宽度这两个维数。我们将模型进一步简化为二维模型，如下图所示。
+\begin{figure}[!h]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/room_01.jpg}
+        \subcaption{房屋示意图}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/32.png}
+        \subcaption{房屋墙壁材料}
+    \end{minipage}
+    \caption{计算示意图}
+\end{figure}
+\paragraph{边界条件与初始条件的确定:}墙壁的散热变为典型的一维复合介质传热，此时
+\begin{equation}
+    Q_{out}=KS\beta (\bigtriangleup T) \omega 
+\end{equation}
+K是传热系数，S是接触面积，$\beta$是散热因子，因为墙壁和窗户而不同，玻璃是1，墙壁是2，$\omega$是温度修正因子。
+要计算传热系数K，先定义单层结构热阻，
+\begin{equation}
+    r=\frac{\delta}{\lambda}
+\end{equation}
+式中：$\delta$是材料层厚度(m)，$\lambda$是材料导热系数。多层结构热阻定义为等于各层材料热阻之和或者是各层材料厚度与导入系数的积之和
+\begin{equation}
+    R=\sum_{i=0}^{n}r_{i} 
+\end{equation}
+根据资料，涂料的导热参数如下表
+\begin{table}[H]
+\centering
+\caption{建筑围护层的导热}
+\begin{tabular}{|c|c|c|}
+\hline
+外壳结构材料    & $\delta$ & $\lambda$ \\ \hline
+外墙水泥砂浆涂料  & 0.02     & 0.93     \\ \hline
+住宅粘土的砖墙   & 0.20     & 0.81     \\ \hline
+内壁用石灰砂浆涂料 & 0.02     & 0.81     \\ \hline
+\end{tabular}
+\end{table}
+定义房屋一维传热系数K为
+\begin{equation}
+     K=\frac{1}{1/\alpha_{in}+1/\alpha_{out}+R}=\frac{1}{\frac{1}{8.7} +\frac{1}{23}+\frac{0.02}{0.93}+\frac{0.20}{0.81}+\frac{0.02}{0.81}}=2.215 W /(m^2\cdot {\circ}C) 
+\end{equation}
+式中$\alpha$是房屋内外壁的传热系数。
+\par
+利用问题一中所给房屋平面图进行面积计算，可得墙壁与玻璃面积分别为77，3。
+\paragraph{传热片放热：}
+传热片的放热主要通过水的热对流效应实现，这可以根据水的Dittus-Boelter公式计算放热
+\begin{equation}
+\begin{array}{l}
+\mathrm{Nu}=0.023\times \operatorname{Re}^{ 0.8}\times\operatorname{Pr}^{0.4}\\
+\operatorname{Re}=\frac{\rho V D}{\mu}\\
+Q_{in}=\mathrm{Nu}\times \lambda / \mathrm{D}
+\end{array}
+\end{equation}
+Re表示雷诺数，定义为流体的惯性力与粘性力的比值，V是流速。Pr表示普朗特数，定义为流体的惯性热传导能力与粘性热传导能力的比值，$\lambda$是热导率，Nu为Nusselt数，D是圆管直径。在常规温度和压力下，水的普朗特数为6.9767，热导率为0.6瓦每米摄氏度。
+\paragraph{模型求解}
+在假设圆管半径为20mm的情况下。当认为室外温度不变恒等于21度时，联立2，5，6式，得到
+\begin{equation}
+    \frac{(Q_{in}-Q_{out})t}{mc}=\bigtriangleup T
+\end{equation}
+解常微分方程可得
+\begin{equation}
+  \begin{array}{c}
+s=\pi \cdot C_{1}\cdot \text{ta}\cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}}  \frac{{      1 - 
+\exp\left(-\frac{{t \cdot (C_1 \cdot \pi \cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}} + C_3)}}{C_4}\right) }}
+{{C_1 \cdot \pi \cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}} + C_3}}\\
+\left\{\begin{matrix}
+ C_{1}=4.224 \times 10^{16}\\
+ C_{2}=5 \times 10^7\\
+C_{3}=1.223554131575177216 \times 10^{19}\\
+C_{4}=6.84221687918493696 \times 10^{18}
+\end{matrix}\right.
+\end{array}
+\end{equation}
+得到房屋温度关于水温和流量的函数如图
+\begin{figure}[!h]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/math1.png}
+        \subcaption{流量为1立方米每小时，水温60摄氏度时房屋温度与时间的函数}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/math.png}
+        \subcaption{时间为半小时时，房屋温度与流量和水温的函数}
+    \end{minipage}
+    \caption{房屋温度和流量，水温和时间的关系}
+\end{figure}
+\paragraph{结果分析}
+函数显示在流量为1立方米每小时，水温60摄氏度的条件下房屋能在半小时左右升温至37度，总体温度曲线变化先快后慢，在一小时后曲线变化明显比较缓慢。水温对温度的影响强于流量的影响。
+显示散热器的效果比较好，能够快速升温并且维持恒定温度。温度的调节可以考虑先调节温度进行粗调，再调节流量进行微调。
+\subsection{问题二：基于遗传算法的决策模型}
+首先，我们根据室外温度变化的拟合曲线，建立了室内温度随时间的动态模型。通过求解微分方程，我们得到了室内温度随时间的解析表达式。
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.3\textheight,width=0.85\textwidth]{CUMCMThesis-master/figures/outside.jpg}
+    \caption{室外温度曲线}
+    \label{fig:enter-label}
+\end{figure}
+然后我们建立了求解器模型，将理想温度区间设为$[22.5,23.5]$，然后多次运行输入进优化器求出最优解，流程如图：
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.3\textheight,width=0.9\textwidth]{CUMCMThesis-master/figures/5.png}
+    \caption{求解流程图}
+    \label{fig:enter-label}
+\end{figure}
+\paragraph{判断器}
+判断器用来判断一个时间间隔内是否需要改变流量。在合理的阈值下，如果室内外温差过大，判断器会要求流量决策器改变流量。
+\paragraph{流量判断器}
+对于一个极短时间间隔，可以认为室外室内温度不变，这样对一个时间间隔来说，最优的流量应该使得升温速度等于温差除以时间间隔，即
+\begin{equation}
+    \text{such} ~~va \Longrightarrow \text{rate of temperature}=\frac{T_{obj}-T_{in}}{n} 
+\end{equation}
+考虑到所有的局部最优并不一定等于全局最优，我们在流量决策器里加入了随机变量，这表示全局最优解在个体上不会离局部最优太远。当室外温度改变时，如果它不足以改变室内温度太多，可以认为不用改变流量，而当室内温度下降或上升太多时才有必要调整流量，注意到流量对室温的影响也跟室外温度有关，这样控制模型一定会在某个时刻对室外温度的变化进行响应。
+\paragraph{优化器}
+优化器使用遗传算法寻找最优解，为此我们需要寻找一批子体，子体的产生如图：
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.25\textheight,width=0.85\textwidth]{CUMCMThesis-master/figures/35.png}
+    \caption{子体算法流程}
+    \label{fig:enter-label}
+\end{figure}
+其中n是一个三元组，记录温差，是否改变流量，流量。序列是n的集合，有一个标志位N，表示改变的次数。
+\par
+以下是遗传算法的伪代码图：
+\begin{algorithm}[H]
+\caption{遗传算法（Genetic Algorithm, GA）}
+\label{alg:ga}
+\begin{algorithmic}[1]
+\STATE 输入100个序列
+\WHILE{迭代次数小于1000}
+    \STATE \textbf{选择操作：}随机选m个
+    \STATE \textbf{交叉操作：}选择N最小的序列，将其中3组连续20个点位的值随机赋给其他序列对应点位。
+    \STATE \textbf{变异操作：}选m个序列，将里面连续20个点位的流量乘以$1+\delta,\delta \in [-0.05,0.05]$
+    \STATE \textbf{淘汰操作：}记录最优的m/2个，加入下一次交叉，去掉N最大的m/2个。
+\ENDWHILE
+\STATE \textbf{返回}最优个体
+\end{algorithmic}
+\end{algorithm}
+因为在此问题里前面的流量改变会影响后面的判断，所以不能随机只改变个别时间段的流量，在交叉操作里，我们将N比较小的子体的有值的地方，认为是子体的特征并将它遗传给了其它个体，希望能够保留该特征。然后，为避免局部最优我们采取了变异操作，它将某些点位的流量改变并且赋0，保证N不会变大，在淘汰操作里，我们选择最好的子体，去掉末位的子体。在这个遗传算法里面我们没有选择轮盘赌的概率选择，因为N越小越符合要求。
+\par
+结果如图
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.25\textheight,width=0.75\textwidth]{CUMCMThesis-master/figures/math2.png}
+    \caption{自动控制下的室温}
+    \label{fig:enter-label}
+\end{figure}
+在最优的子体中我们只需要调整10次，子体序列与图附在附录。
+\subsection{问题三：基于PID算法的流量控制模型}
+控制算法需要自适应地根据环境变量和反馈来调整参数，出于考虑过去数据和误差的要求，我们选择了PID算法，PID作为经典算法有以下形式：
+\begin{equation}
+    u(t)=K_{P}\left[e(t)+\frac{1}{T_{I}} \int_{0}^{t} e(t) d t+T_{D} \frac{d e(t)}{d t}\right]
+\end{equation}
+因为所给数据是离散化的，我们将PID算法调整为离散模式：
+\begin{equation}
+   \mathrm{u}(k)=K_{p} e(k)+K_{i} \sum_{n=0}^{k} e(n)+K_{d}(e(k)-e(k-1))
+\end{equation}
+其中$K_{p}$是比例项系数，它考虑了当前误差并根据误差大小而调整变化率，$K_{i}$是积分项系数，它考虑过去误差，将误差值过去一段时间和（误差和）纳入考虑，可以减小静态情况下的误差，让受控物理量尽可能接近目标值。$K_{d}$是差分项系数，考虑将来误差，计算误差的一阶导，可以减缓未来因为流量过高而使房屋温度过高的问题。e是误差项。其作用过程如图
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.22\textheight,width=0.88\textwidth]{CUMCMThesis-master/figures/PID.png}
+    \caption{PID算法流程}
+    \label{fig:enter-label}
+\end{figure}
+\par
+为提高控制系统的稳定性，我们先以高流量加热半小时至理想温度附近，再应用PID算法进行后续控制。我们还设置了供水流量的最大限制，以确保流量不超过系统的承载能力。控制循环中，我们根据输出控制信号计算新的供水流量，并更新当前温度。目标是使室内温度尽快稳定在设定的目标温度附近，并尽量减少调整次数。在控制循环中，我们输出了每个时间点的控制信号、供水流量和当前温度。最后，通过绘制供水流量随时间的变化曲线和室内温度随时间的变化曲线来可视化结果。我们以6分钟为步长进行了8小时的仿真，结果如图：
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/math3(1).png}
+        \subcaption{流量变化图}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/math3(2).png}
+        \subcaption{温度变化图}
+    \end{minipage}
+    \caption{PID仿真}
+\end{figure}
+结果显示流量在初期快速下降，然后在某个范围内小幅振荡，而温度在快速上升后可以长时间维持在理想温度区间内，能够使控制系统在给定的目标值附近稳定运行。该算法通过不断调整供水流量，使得室内温度能够在设定范围内尽快稳定，并在保持温度稳定的同时尽量减少了调整次数。这证明我们的控制模型效果达到预期。
+\section{灵敏性分析}
+\subsection{针对问题一微分模型中水温和流量的灵敏性分析}
+我们将水温设定为60度，室内外温差设定为，得到以下流量和温度变化率的关系
+\begin{figure}[H]
+    \centering
+    \includegraphics[height=0.25\textheight,width=0.78\textwidth]{CUMCMThesis-master/figures/untitled1.jpg}
+    \caption{流量与温度变化率的关系}
+    \label{fig:enter-label}
+\end{figure}
+而根据问题一的模型，在确定的流量和室内外温差下，温度变化率与水温成正比，有
+\begin{equation}
+    \pi \cdot C_{1}\cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}}  \frac{{      1 - 
+\exp\left(-\frac{{t \cdot (C_1 \cdot \pi \cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}} + C_3)}}{C_4}\right) }}
+{{C_1 \cdot \pi \cdot \left(\frac{{C_2 \cdot \text{va}}}{\pi}\right)^{\frac{3}{5}} + C_3}}
+\end{equation}
+其中$C_{1},C_{2},C_{3},C_{4}$与问题一一致。
+\subsection{针对问题三中PID算法控制系数的灵敏性分析}
+由于代码运行占用内存较大，所以灵敏度分析只观察4h内室内温度的表现情况
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/untitled5.jpg}
+        \subcaption{调大KP到20}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/untitled7.jpg}
+        \subcaption{减小KP到5}
+    \end{minipage}
+    \caption{$K_{p}$的灵敏性分析}
+\end{figure}
+\textbf{改变$K_{p}$:}增大它,理论上可以看到PID调节的更快更陡。实际上产生了自激震荡，说明kp不能调的过大，否则系统会不稳定。减小kp，理论上系统调节缓慢，会产生超调量，调节曲线不平滑，有毛刺。实际上也证明比例系数太小，系统变化时调节相对缓慢。调节也变得不稳定。
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/untitled9.jpg}
+        \subcaption{调大Kd到80}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/untitled10.jpg}
+        \subcaption{减小Kd到10}
+    \end{minipage}
+    \caption{$K_{d}$的灵敏性分析}
+\end{figure}
+\textbf{改变$K_{d}$:}增大kd，理论上系统稳定时波动很大，精度不高，且有很多毛刺与抖动。实际上系统开始调节时会有些尖峰，调节曲线不平滑。减小kd，理论上系统调节稳定时变化缓慢，会有些超调量。实际上也可以看出减小kd对系统影响不大，只是在系统刚进入稳定状态时有一个小小的超调量。
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/ki1.png}
+        \subcaption{调大Ki到2}
+    \end{minipage}
+    \begin{minipage}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=0.2\textheight]{CUMCMThesis-master/figures/ki2.png}
+        \subcaption{减小Ki到0.5}
+    \end{minipage}
+    \caption{$K_{i}$的灵敏性分析}
+\end{figure}
+\textbf{改变$K_{i}$:}增大ki,积分变大，系统系统变得不稳定，抖动波动很厉害。实际上可以其变化幅度大，超调量很高，系统很不稳定。减小ki到0.5,系统调节变慢，系统可能无法调节。系统无法达到设定的稳态值，无法调节。
+
+\section{模型总结}
+\subsection{模型优点}
+\begin{itemize}
+    \item 在对传热模型分析的时候，将墙壁简化成了一维模型，用三层结构模型替代墙壁，并集中考察了热传导、热对流两种传热方式，避免了对内部空气传热进行计算，减少了运算量。
+    \item 调整流量模型中，考虑到室温是呈一个先上升后下降的变化形式，因此我们在上升阶段选取最高温度作为阈值，下降阶段最低温度作为阈值，避免对阈值进行分析，从而减小了计算难度。
+    \item 求解动作次数最少时，采用了遗传算法，保证了求解结果能够在最大程度上趋近于实际值，拟合精度高。
+\end{itemize}
+\subsection{模型缺点}
+\begin{itemize}
+    \item 忽略了室内空气的对流热交换，在房屋尺寸较大时会产生误差。
+    \item 问题二中的模型空间复杂度达到$O(n^{3})$，占用大量内存。
+    \item PID算法参数调整困难：PID控制算法的性能高度依赖于参数的调整，而参数调整需要实际系统的试验和经验。对于复杂的温度控制模型，找到最优的PID参数可能需要一定的实践和调试。
+\end{itemize}
+\subsection{模型改进和推广}
+在问题一中，可以求解传热模型时考虑空气热对流的影响，将其囊入理想热模型的评价中。在问题三中可以引入模糊控制（PSD）或者模型预测控制等先进控制算法，以获取最优的控制参数，以提升对复杂系统和非线性特性的适应性和控制精度。
+\section{非技术文章}
+\textbf{尊敬的董事会:}
+\par
+在北方寒冷的冬季，一个有效且高效的室内供暖系统成为了人们生活的必备设施。传统的供暖系统虽然能够为居住环境带来温暖，但由于其供暖水流量和热水温度的控制较为粗糙，经常出现供暖不均匀或供暖过度的问题。随着节能环保观念的深入人心，如何让供暖系统更智能，更高效，更节能，以达到碳中和的目标，已经引起了社会的广泛关注。
+\par
+近年来，家庭采暖系统的智能化和自适应性控制越来越受到重视。这一方向的研究不仅关注提高室内温度控制的精准度，而且还希望能有效降低能源消耗。其中，室内温度的自适应控制技术就是一种实用的解决方案，它通过智能化的方式，对室内暖气散热片的供热水流进行精确的控制，从而达到室内温度的恒定。
+\par
+现代智能温控器可以调节热水的流量。根据室内温度和预设的目标温度，智能温控器可以自动调整热水的流量，从而实现对室内温度的精确控制。然而，尽管现有的智能温控器已经取得了一定的效果，但由于其内部参数的固定性，无法适应所有用户的使用场景。例如，当用户希望将房间加热到24度时，由于软件介入的延迟，可能会造成过度加热，导致房间温度升至27-28度。此外，智能温控器可能在调节过程中关闭阀门，使得室内温度在过高后又变得过低。这种频繁的调节导致室内温度不断波动，影响了用户的舒适度。因此，如何改进智能温控器，使其能更好地适应不同用户的需求，以及如何有效利用过去的调节数据进行预测和优化，已经成为了研究者和开发者需要解决的问题。对于如何更好地控制供暖水流，我们提出了一种新的调节策略。首先，建立了一个模型，用以描述供热的水温、热水流量与房间内温度之间的关系。然后，提出了一种根据室外环境温度和设定的目标温度，对供热水流进行调节的方法。这种方法不仅可以使室内温度尽快达到设定的目标，而且还能保证室内温度的波动偏差在一定范围内。此外，这种方法还能根据过去的调节数据进行优化，从而在调节水流的次数尽可能少的情况下，实现对室内温度的精确控制。
+\par
+通过引入智能化和自适应性的控制技术，可以使供暖系统的效率大大提高，同时也可以提升用户的使用体验。这种新的调节策略具有很大的应用潜力，未来有望在供暖设备的生产和使用中得到广泛应用。
+\par
+总的来说，随着科技的发展和环保观念的深入，智能化和自适应性的控制技术将在供暖系统中发挥越来越重要的作用。它不仅能提供更舒适的室内环境，还能有效地节约能源，实现碳中和的目标。因此，研究和开发更高效、更智能的供暖系统是未来的重要方向。
+\begin{thebibliography}{9}%宽度9
+            \bibitem{pidone}K. Meng, Z. He and H. Sun, "Research and analysis of heating efficiency and pollution emission based on heat dissipation of building walls," 2021 33rd Chinese Control and Decision Conference (CCDC), Kunming, China, 2021, pp. 7204-7211.
+            \bibitem{pidtwo}Z. He, X. Liu and H. Sun, "Design of Constant Temperature Building Heating System Based on Fuzzy Adaptive PID Control," 2021 40th Chinese Control Conference (CCC), Shanghai, China, 2021, pp. 2226-2232.
+            \bibitem{three}刘艳峰.基于模糊PID算法的温度控制系统的设计[J].电子产品世界,2023,30(05):17-19+30.
+            \bibitem{four}张伟,李绍铭,闫成忍.基于自适应遗传算法Smith非线性PID的加热炉温度控制[J].荆楚理工学院学报,2019,34(05):13-17.
+
+\end{thebibliography}
+\begin{appendices}
+    \section{代码}
+    \begin{lstlisting}[language=Matlab]
+    clc;
+clear all;
+
+%求室外拟合曲线
+T=0:1:23;
+TemOut=[-5,-5,-4,-4,-3,-3,-2,-1,0,2,4,6,8,10,10,9,7,5,2,0,-1,-2,-4,-5];
+p=polyfit(T,TemOut,5);
+syms TemIn(t) va(t) TemOut(t);
+TemOut(t)=p(6)+p(5)*t+p(4)*t^2+p(3)*t^3+p(2)*t^4+p(1)*t^5;
+Time=0:0.01:23;
+Tout=subs(TemOut,t,Time);
+plot(Time,Tout);
+title('室外温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室外温度（℃）')
+
+
+%求解微分方程
+eqn=diff(TemIn,t)==(2*2.215*77*(TemOut-TemIn)*1+1*2.215*3*(TemOut-TemIn)*1+0.023*(10^6*va/(pi*0.02))^0.5*(4.186/0.6)^0.4*(0.6/0.02)*0.8*pi*(60-TemIn))/(1.29*150*1.005);
+
+%第一阶段
+cond=TemIn(0)==-5;
+s=dsolve(eqn,cond);
+s0=subs(s,va,0.00056);
+Time0=0:0.01:0.5;
+S0=subs(s0,t,Time0);
+plot(Time0,S0);
+title('第一阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第二阶段
+cond=TemIn(0.5)==23.5;
+s1=dsolve(eqn,cond);
+s11=subs(s1,va,0.000273);
+Time1=0.51:0.01:5.9;
+S1=subs(s11,t,Time1);
+plot(Time1,S1);
+title('第二阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第三阶段
+cond=TemIn(5.9)==23.5;
+s2=dsolve(eqn,cond);
+s22=subs(s2,va,0.00022);
+Time2=5.91:0.01:7.9;
+S2=subs(s22,t,Time2);
+plot(Time2,S2);
+title('第三阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第四阶段
+cond=TemIn(7.9)==23.5;
+s3=dsolve(eqn,cond);
+s33=subs(s3,va,0.000165);
+Time3=7.91:0.01:9.6;
+S3=subs(s33,t,Time3);
+plot(Time3,S3);
+title('第四阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+
+%第五阶段
+cond=TemIn(9.6)==23.5;
+s4=dsolve(eqn,cond);
+s44=subs(s4,va,0.00013);
+Time4=9.61:0.01:10.9;
+S4=subs(s44,t,Time4);
+plot(Time4,S4);
+title('第五阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第六阶段
+cond=TemIn(10.9)==23.5;
+s5=dsolve(eqn,cond);
+s55=subs(s5,va,0.000092);
+Time5=10.91:0.01:13.2;
+S5=subs(s55,t,Time5);
+plot(Time5,S5);
+title('第六阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+
+%第七阶段-----最缓降温
+cond=TemIn(13.2)==23.5;
+s6=dsolve(eqn,cond);
+s66=subs(s6,va,0.000086);
+Time6=13.21:0.01:16.4;
+S6=subs(s66,t,Time6);
+plot(Time6,S6);
+title('第七阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+
+%第八阶段
+cond=TemIn(16.4)==22.5;
+s7=dsolve(eqn,cond);
+s77=subs(s7,va,0.000125);
+Time7=16.41:0.01:18;
+S7=subs(s77,t,Time7);
+plot(Time7,S7);
+title('第八阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第九阶段
+cond=TemIn(18)==22.5;
+s8=dsolve(eqn,cond);
+s88=subs(s8,va,0.00018);
+Time8=18.01:0.01:19.4;
+S8=subs(s88,t,Time8);
+plot(Time8,S8);
+title('第九阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+
+%第十阶段
+cond=TemIn(19.4)==22.5;
+s9=dsolve(eqn,cond);
+s99=subs(s9,va,0.000245);
+Time9=19.41:0.01:20.9;
+S9=subs(s99,t,Time9);
+plot(Time9,S9);
+title('第十阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+%第十一阶段
+cond=TemIn(20.9)==22.5;
+s10=dsolve(eqn,cond);
+s1010=subs(s10,va,0.000312);
+Time10=20.91:0.01:23;
+S10=subs(s1010,t,Time10);
+plot(Time10,S10);
+title('第十一阶段室内温度随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+
+
+
+Time0=0:0.01:0.5;
+Time1=0.51:0.01:5.9;
+Time2=5.91:0.01:7.9;
+Time3=7.91:0.01:9.6;
+S0=subs(s0,t,Time0);
+S1=subs(s11,t,Time1);
+S2=subs(s22,t,Time2);
+S3=subs(s33,t,Time3);
+
+Time4=9.61:0.01:10.9;
+S4=subs(s44,t,Time4);
+
+Time5=10.91:0.01:13.2;
+S5=subs(s55,t,Time5);
+
+Time6=13.21:0.01:16.4;
+S6=subs(s66,t,Time6);
+
+Time7=16.41:0.01:18;
+S7=subs(s77,t,Time7);
+
+Time8=18.01:0.01:19.4;
+S8=subs(s88,t,Time8);
+
+Time9=19.41:0.01:20.9;
+S9=subs(s99,t,Time9);
+
+Time10=20.91:0.01:23;
+S10=subs(s1010,t,Time10);
+
+S=[S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10];
+plot(Time,S);
+title('室内温度在调节下随时间的变化')
+xlabel('时间（h）')
+ylabel('室内温度（℃）')
+
+    \end{lstlisting}
+
+\begin{lstlisting}[language=Matlab]
+
+% 求室外拟合曲线
+T=0:1:23;
+TemOut=[-5,-5,-4,-4,-3,-3,-2,-1,0,2,4,6,8,10,10,9,7,5,2,0,-1,-2,-4,-5];
+p=polyfit(T,TemOut,5);
+syms TemIn(t) va(t) TemOut(t);
+TemOut(t)=p(6)+p(5)*t+p(4)*t^2+p(3)*t^3+p(2)*t^4+p(1)*t^5;
+tt=0:0.01:23;
+tem=polyval(p,tt);
+plot(tt,tem);
+xlabel('时间（h）');
+ylabel('室外温度（℃）');
+title('室外温度变化曲线');
+
+\end{lstlisting}
+\begin{lstlisting}[Matlab]
+    
+syms y(t) va ta;
+eqn=diff(y,t)==(2*2.215*77*(0-y)*1+1*2.215*3*(0-y)*1+0.023*(10^6*va/(pi*0.02))^0.8*(4.186/0.6)^0.4*(0.6/0.02)*0.8*pi*(ta-y))/(1.29*150*1.005);
+cond=y(0)==0;
+s=dsolve(eqn,cond);
+simplify(s);
+simplified=vpa(s);
+S=subs(s,t,0.5);
+
+%水流量灵敏度分析
+dva=diff(S,va);
+dta=diff(S,ta);
+Dva=subs(dva,ta,60);
+Va=0.00001:0.00001:0.00056;
+Dva_real=subs(Dva,va,Va);
+plot(Va,Dva_real);
+xlabel('水流量');
+ylabel('温度变化');
+title('水流量灵敏度分析');
+
+%水温灵敏度分析
+% dta=diff(S,ta);
+% Dta=subs(dta,va,0.00028);
+% Ta=1:1:80;
+% Dta_real=subs(Dta,ta,Ta);
+% plot(Ta,Dta_real);
+% xlabel('水温');
+% ylabel('温度变化');
+% title('水温灵敏度分析');
+\end{lstlisting}
+\section{自动调整室温操作}
+十一个阶段图，共计调整十次：
+\begin{figure}[!h]
+    \centering
+    \begin{minipage}[c]{0.9\textwidth}
+        \centering
+        \includegraphics[width=0.3\textwidth]{figures/fig1.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig2.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig3.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig4.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig5.png}
+        \subcaption{前五阶段}
+    \end{minipage}
+    
+    \vspace{0.5cm}
+    
+    \begin{minipage}[c]{0.9\textwidth}
+        \centering
+        \includegraphics[width=0.3\textwidth]{figures/fig6.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig7.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig8.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig9.png}
+        \includegraphics[width=0.3\textwidth]{figures/fig10.png}
+        \subcaption{后五阶段}
+    \end{minipage}
+    \caption{10阶段}
+    \label{fig:my_label}
+\end{figure}
+\section{术语与定理}
+
+傅里叶定律是热传导基本定律，描述温度差与热流密度的关系。
+\begin{equation}
+    q=-\lambda \frac{d T}{d x}
+\end{equation}
+q 为热流密度，$\lambda$ 表示传热系数，dt/dx 表示空间节点上的温度差。
+\par
+Dittus-Boelter 公式:Dittus-Boelter公式是用于计算流体在管内传热系数的公式，适用于流体雷诺数大于10000，流程为层流或过渡流的情况。
+\par
+热传导率：是物性参数，在数值上等于单位温度梯度作用下单位时间内单
+位面积的热量，单位为：$W / m \cdot{ }^{\circ} \mathrm{C}$。它与物质的结构与状态密切相关，与几何形状无关。
+\end{appendices}
+
+
+
+\end{document} 
